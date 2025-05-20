@@ -1,3 +1,6 @@
+use core::time;
+use std::time::Instant;
+
 use ::nalgebra::Vector2;
 use font::get_font_5x7;
 use minifb::{Window, WindowOptions};
@@ -11,17 +14,20 @@ pub mod nalgebra {
 
 pub mod chart;
 pub mod font;
+pub mod shapes;
+
+pub use shapes::Shape;
 
 pub type Pixel = u32;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum StrokeType {
     Inner,
     Outer,
     Center,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Stroke {
     pub color: Pixel,
     pub width: usize,
@@ -35,6 +41,9 @@ pub struct Screen {
     pub window: Window,
     stroke: Stroke,
     fill: Pixel,
+    delta_time: f64,
+    pub fps_estimate: f64,
+    last_time: Instant,
 }
 
 impl Screen {
@@ -44,7 +53,7 @@ impl Screen {
         let mut window = Window::new(window_name, width, height, opts).unwrap_or_else(|e| {
             panic!("Window creation failed: {}", e);
         });
-        window.set_target_fps(30);
+        window.set_target_fps(60);
 
         let stroke = Stroke {
             color: 0xFFFFFF, // Default stroke color (white)
@@ -61,6 +70,9 @@ impl Screen {
             window,
             stroke,
             fill,
+            delta_time: 0.0,
+            fps_estimate: 0.0,
+            last_time: Instant::now(),
         }
     }
 
@@ -80,6 +92,21 @@ impl Screen {
 
     pub fn target_fps(&mut self, fps: usize) {
         self.window.set_target_fps(fps);
+    }
+
+    pub fn draw_shapes(&mut self, shapes: &[Box<dyn shapes::Shape>]) {
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let coordinates = Vector2::new(x, y);
+                for shape in shapes.iter().rev() {
+                    if let Some(color) = shape.is_in_shape(coordinates) {
+                        self.set_pixel(coordinates, color);
+                        break;
+                    }
+                }
+            }
+        }
+        println!("draw_shapes {}", shapes.len());
     }
 
     // FIX: check srtoke width
@@ -326,6 +353,11 @@ impl Screen {
         self.window
             .update_with_buffer(&self.buffer, self.width, self.height)
             .unwrap();
+        let current_time = Instant::now();
+        let elapsed = current_time.duration_since(self.last_time).as_secs_f64();
+        self.delta_time = elapsed;
+        self.last_time = current_time;
+        self.fps_estimate = 1.0 / elapsed;
     }
 
     pub fn is_window_open(&self) -> bool {
